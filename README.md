@@ -1,12 +1,12 @@
 # Linux Server Deployment and Networking
 
-A hands-on project completed as part of **Codomax Internship -- Module
-02**. It covers Linux fundamentals, networking, AWS EC2 provisioning,
-SSH access, firewall configuration, and Nginx deployment.
+A practical project completed as part of **Codomax Internship -- Module
+02**, covering Linux administration fundamentals, networking, AWS EC2
+provisioning, SSH access, firewall configuration, and Nginx deployment.
 
-> **Final outcome:** An Ubuntu Server 24.04 LTS EC2 instance was
-> configured with SSH access, UFW firewall rules, and Nginx. The default
-> Nginx welcome page was successfully accessed through the instance's
+> **Project result:** Deployed an Ubuntu Server 24.04 LTS instance on
+> AWS EC2, configured SSH and UFW access, installed Nginx, and
+> successfully accessed the Nginx welcome page through the instance's
 > public IPv4 address.
 
 ## Table of Contents
@@ -24,6 +24,7 @@ SSH access, firewall configuration, and Nginx deployment.
 -   [Screenshots](#screenshots)
 -   [Key Learnings](#key-learnings)
 -   [Repository Structure](#repository-structure)
+-   [Acknowledgement](#acknowledgement)
 
 ## Project Overview
 
@@ -98,8 +99,7 @@ My goals were to:
 
 ## Architecture
 
-The architecture diagram is maintained separately in the `architecture/`
-directory.
+The architecture diagram is maintained in the `architecture/` directory.
 
 ![Linux Server Deployment and Networking
 Architecture](architecture/architecture.png)
@@ -144,13 +144,23 @@ Architecture](architecture/architecture.png)
 
 ### Security Group Inbound Rules
 
-  Type   Protocol     Port Source
-  ------ ---------- ------ -----------------------------------------
-  SSH    TCP            22 Administrator's current public IP `/32`
-  HTTP   TCP            80 `0.0.0.0/0`
+  ------------------------------------------------------------------------
+  Type             Protocol                          Port Source
+  ---------------- ---------------- --------------------- ----------------
+  SSH              TCP                                 22 Administrator
+                                                          public IP
+                                                          address(es),
+                                                          `/32` per
+                                                          address
 
-SSH should be restricted to a trusted administrator IP address. Avoid
-leaving SSH open to `0.0.0.0/0` in a production environment.
+  HTTP             TCP                                 80 `0.0.0.0/0`
+  ------------------------------------------------------------------------
+
+During troubleshooting, the outbound public IP observed from WSL changed
+between `103.189.159.244` and `103.189.159.246`. Both addresses were
+added as individual `/32` SSH sources when needed. SSH should be
+restricted to trusted administrator IP addresses. Avoid leaving SSH open
+to `0.0.0.0/0` in a production environment.
 
 The EC2 public IPv4 address is not hard-coded here because it can change
 after an instance is stopped and started unless an Elastic IP is
@@ -198,6 +208,8 @@ sudo systemctl status nginx
 
 ### 6. UFW Firewall
 
+UFW was enabled and configured to allow SSH and HTTP traffic.
+
 ``` bash
 sudo ufw allow OpenSSH
 sudo ufw allow 80/tcp
@@ -205,8 +217,9 @@ sudo ufw enable
 sudo ufw status
 ```
 
-AWS Security Groups and UFW are separate firewall layers. Both must
-allow the required traffic.
+The verified UFW output showed `Status: active`, with OpenSSH and
+`80/tcp` allowed. AWS Security Groups and UFW are separate firewall
+layers. Both must allow the required traffic.
 
 ### 7. Web Server Verification
 
@@ -226,9 +239,9 @@ The expected result is the **Welcome to nginx!** page.
 
 ## Commands Reference
 
-This section collects the commands used or practised during the project,
-grouped by purpose. Replace placeholders such as `<PUBLIC_IP>` with the
-relevant value from your environment.
+The following commands cover the Linux, networking, SSH, and server
+administration work practised during this project. Replace placeholders
+such as `<PUBLIC_IP>` with the relevant value from your environment.
 
 ### A. Navigation and File Management
 
@@ -427,31 +440,39 @@ curl -I http://localhost
 
 ## Challenges and Troubleshooting
 
-### 1. SSH Connection Timeout
+### 1. SSH Connection Timeout and Changing Public IP
 
-**Problem:** SSH connections initially timed out.
+**Problem:** SSH connections initially timed out even though the EC2
+instance was running.
 
 **Investigation and resolution:**
 
--   Checked the current public IP address from WSL.
--   Compared it with the SSH inbound source configured in the EC2
-    Security Group.
--   Updated the SSH rule to allow the current administrator IP using
-    `/32`.
--   Tested TCP port `22` using `nc`.
--   Successfully connected after the network rule and connectivity were
-    corrected.
+-   Checked the current outbound public IP from WSL using
+    `curl -4 https://checkip.amazonaws.com` and `curl ifconfig.me`.
+-   Observed two different public IP addresses: `103.189.159.244` and
+    `103.189.159.246`.
+-   The changing outbound IP meant the existing Security Group SSH
+    source `/32` rule did not always match the current address.
+-   Added the observed administrator IP addresses as individual `/32`
+    SSH sources when required.
+-   Tested TCP port `22` with `nc`.
+-   Once the current IP was allowed and TCP port `22` became reachable,
+    SSH connected successfully.
 
-A changing public IP can make an existing `/32` Security Group rule
-outdated. Check the current public IP when SSH access stops working.
+**Learning:** An ISP or network connection may use more than one
+outbound public IP. A Security Group rule restricted to one `/32`
+address can stop matching when the outbound IP changes. Check the
+current public IP and update the rule when necessary. Keep SSH
+restricted to trusted addresses.
 
-### 2. PEM Key Permission Error
+### 2. PEM Key Permission Error in WSL
 
 **Problem:** OpenSSH rejected the PEM file because its permissions were
-too open when the key was stored under a Windows-mounted path.
+too open when the key was stored under a Windows-mounted path such as
+`/mnt/e/Downloads/`.
 
-**Resolution:** The key was placed in the WSL user's SSH directory and
-its permissions were restricted:
+**Resolution:** The PEM file was copied into the WSL user's SSH
+directory and its permissions were restricted:
 
 ``` bash
 chmod 400 ~/.ssh/codomax-linux-web-server.pem
@@ -459,17 +480,29 @@ chmod 400 ~/.ssh/codomax-linux-web-server.pem
 
 SSH access then succeeded.
 
-### 3. HTTP Connectivity
+### 3. Difference Between SSH Timeout and HTTP Connection Refused
 
-**Problem:** The browser did not initially load the server page.
+During the initial connectivity checks, the two ports returned different
+results:
 
-**Investigation and resolution:**
+-   **Port 22 (SSH): `Connection timed out`** --- the connection attempt
+    received no response. The Security Group source restriction was
+    investigated because the SSH inbound rule did not match the active
+    public IP at that point.
+-   **Port 80 (HTTP): `Connection refused`** --- the TCP connection was
+    rejected at that time, before Nginx was installed and serving HTTP.
 
--   Verified that the Nginx service was active.
--   Checked the local HTTP response with `curl -I http://localhost`.
--   Verified inbound HTTP access on TCP port `80` in the Security Group.
--   Verified that UFW allowed port `80`.
--   Checked the instance's public IPv4 address and opened the HTTP URL.
+After the Security Group rules were corrected, SSH became reachable.
+After Nginx was installed and started, the local HTTP check returned
+`HTTP/1.1 200 OK` and the Nginx welcome page became accessible through
+the public IP.
+
+**Learning:** A timeout and a connection refusal are different symptoms.
+A timeout commonly indicates dropped or unanswered traffic, while a
+refusal indicates that the connection was actively rejected, often
+because no service was listening on that port or a host-level rule
+rejected it. The surrounding network and service state must be checked
+before deciding the cause.
 
 ### 4. HTTP and HTTPS
 
@@ -479,13 +512,13 @@ certificate and corresponding server configuration.
 
 ## Verification and Results
 
-  Check                Result
-  -------------------- ----------------------------------
+  Check                Verified result
+  -------------------- --------------------------------------
   EC2 instance state   Running
   EC2 status checks    3/3 checks passed
   SSH access           Successful key-based login
-  Ubuntu version       Ubuntu Server 24.04 LTS
-  UFW                  Active with SSH and HTTP allowed
+  Ubuntu version       Ubuntu Server 24.04.5 LTS
+  UFW                  Active; OpenSSH and `80/tcp` allowed
   Nginx service        Active (running)
   Local HTTP check     `HTTP/1.1 200 OK`
   Browser test         Nginx Welcome page displayed
@@ -495,22 +528,19 @@ default Nginx welcome page through its public IPv4 address.
 
 ## Screenshots
 
-Store project evidence in the `screenshots/` directory. Suggested
-evidence:
+### AWS Infrastructure
 
--   Linux CLI and file operations
--   File permissions and user/group practice
--   Process and service management
--   IP addressing and DNS checks
--   AWS EC2 instance running
--   Security Group inbound rules
--   SSH connection to the Ubuntu server
--   UFW firewall status
--   Nginx service status
--   Nginx welcome page in the browser
+![Security Group inbound rules](screenshots/aws-infrastructure/sg.png)
 
-Only add screenshots that are actually present in the repository. Do not
-include private keys, credentials, or other sensitive information.
+### Other Project Evidence
+
+Add the relevant screenshots from the repository in the categories below
+as they are available:
+
+-   Linux fundamentals and command-line practice: `linux-practice/`
+-   Networking and connectivity checks: `screenshots/`
+-   AWS infrastructure and security configuration: `screenshots/`
+-   SSH and Nginx deployment: `screenshots/`
 
 ## Key Learnings
 
@@ -521,11 +551,14 @@ include private keys, credentials, or other sensitive information.
 -   Practised DNS lookup and TCP connectivity troubleshooting.
 -   Provisioned and accessed an Ubuntu server on AWS EC2.
 -   Used SSH key-based authentication and corrected private key
-    permissions.
+    permissions in WSL.
+-   Learned how changing public IP addresses can affect IP-restricted
+    Security Group rules.
+-   Understood the difference between a TCP connection timeout and
+    connection refusal.
 -   Understood how AWS Security Groups and UFW work as separate firewall
     layers.
 -   Installed, enabled, and verified the Nginx web server.
--   Troubleshot real SSH and HTTP connectivity issues.
 
 ## Repository Structure
 
@@ -534,22 +567,12 @@ linux-server-deployment-and-networking/
 │
 ├── README.md
 ├── architecture/
-│   ├── architecture.png
-│   └── architecture.md
+│   └── architecture.png
+├── linux-practice/
 ├── screenshots/
-│   ├── linux-fundamentals/
-│   ├── networking/
-│   ├── aws-infrastructure/
-│   └── nginx-deployment/
-└── commands/
-    ├── linux-commands.md
-    ├── networking-commands.md
-    ├── ssh-commands.md
-    └── nginx-commands.md
+│   └── aws-infrastructure/
+│       └── sg.png
 ```
-
-The directory names above are a recommended organisation. Keep only
-files and folders that you have actually created.
 
 ## Acknowledgement
 
